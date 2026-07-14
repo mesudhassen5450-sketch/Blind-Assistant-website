@@ -1,9 +1,8 @@
-const OpenAI = require('openai');
+const fetch = require('node-fetch');
 require('dotenv').config();
 
-const openai = new OpenAI({
-    apiKey: process.env.OPENAI_API_KEY,
-});
+const GROQ_API_KEY = process.env.GROQ_API_KEY;
+const GROQ_API_URL = 'https://api.groq.com/openai/v1/chat/completions';
 
 const SYSTEM_PROMPT = `
 You are the AI Guide for BlindTechHub, a website designed for blind and visually impaired users.
@@ -39,26 +38,50 @@ exports.handler = async (event, context) => {
     try {
         const { message, page, language, pageContent } = JSON.parse(event.body);
 
-        const response = await openai.chat.completions.create({
-            model: "gpt-4o-mini",
-            messages: [
-                { role: "system", content: SYSTEM_PROMPT.replace('{page}', page || '/').replace('{language}', language || 'en').replace('{pageContent}', pageContent || 'No content available') },
-                { role: "user", content: message }
-            ],
-            temperature: 0.7,
+        if (!GROQ_API_KEY) {
+            throw new Error('GROQ_API_KEY environment variable is not set');
+        }
+
+        const response = await fetch(GROQ_API_URL, {
+            method: 'POST',
+            headers: {
+                'Authorization': `Bearer ${GROQ_API_KEY}`,
+                'Content-Type': 'application/json',
+            },
+            body: JSON.stringify({
+                model: 'llama-3.3-70b-versatile',
+                messages: [
+                    { 
+                        role: 'system', 
+                        content: SYSTEM_PROMPT
+                            .replace('{page}', page || '/')
+                            .replace('{language}', language || 'en')
+                            .replace('{pageContent}', pageContent || 'No content available') 
+                    },
+                    { role: 'user', content: message }
+                ],
+                temperature: 0.7,
+                max_tokens: 1024,
+            }),
         });
 
-        const aiResponse = response.choices[0].message.content;
+        if (!response.ok) {
+            const errorData = await response.json();
+            throw new Error(`Groq API error: ${JSON.stringify(errorData)}`);
+        }
+
+        const data = await response.json();
+        const aiResponse = data.choices[0].message.content;
 
         return {
             statusCode: 200,
             body: JSON.stringify({ response: aiResponse }),
         };
     } catch (error) {
-        console.error('OpenAI Error:', error);
+        console.error('Groq API Error:', error);
         return {
             statusCode: 500,
-            body: JSON.stringify({ error: 'Failed to fetch AI response' }),
+            body: JSON.stringify({ error: `Failed to fetch AI response: ${error.message}` }),
         };
     }
 };
